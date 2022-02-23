@@ -1,0 +1,230 @@
+*&---------------------------------------------------------------------*
+*& Report  ZBC_MONITORING_APP
+*&
+*&---------------------------------------------------------------------*
+*&
+*&
+*&---------------------------------------------------------------------*
+
+REPORT  ZBC_MONITORING_APP.
+
+Type-POOLS rssrc.
+
+DATA: I_T_SEARCH_temp type  RSSRC_T_FIELDVAL,
+      I_T_SERVER_temp type  RSSRC_T_SERVER,
+      RSSRC_T_SYSLOG_temp type RSSRC_T_SYSLOG_FOUND,
+      WA_I_T_SEARCH_temp LIKE LINE OF I_T_SEARCH_temp,
+      WA_I_T_SERVER_temp LIKE LINE OF I_T_SERVER_temp,
+      it_list TYPE STANDARD TABLE OF MSXXLIST,
+      it_list_wa LIKE LINE OF it_list,
+      length_it_list TYPE i,
+      length_entries_tab TYPE i,
+      ID_ENTRIES_temp TYPE i,
+      global_entries_name TYPE string,
+      iterator_it_list type i,
+      length_e_t_syslog_found type i,
+      iterator_e_t_syslog_found  type i,
+      iterator_date  type i,
+      date_exist  type c LENGTH 1,
+      CHECK_DATE_temp  type MSNAME2,
+      DATE_temp  type MSNAME2,
+      DATE_temp1  type MSNAME2,
+      total_entries  type i,
+      idx_it_zentries_temp  type i,
+      dtes_equals  type i,
+      idx_it_dte_eq  type i,
+      it_zentries_idx  type i.
+
+DATA: wa_ZENTRIES         Type ZENTRIES,
+      wa_ZENTRIES_temp    Type ZENTRIES,
+      it_ZENTRIES         type standard table of ZENTRIES,
+      IT_ZENTRIES_temp    type standard table of ZENTRIES.
+
+
+DATA :date_minus_1 type d,
+      time_f  type t,
+      time_to type t.
+
+data: gd_outputdate type string,
+           gd_day(2),   "field to store day 'DD'
+           gd_month(2), "field to store month 'MM'
+           gd_year(4).  "field to store year 'YYYY'
+* split date into 3 fields to store 'DD', 'MM' and 'YYYY'
+
+
+PARAMETERS: date_in type d,
+            mx_it_dt type i,
+            regex_t type rschavl.
+
+if date_in = 0.
+  date_in = sy-datum.
+ENDIF.
+
+if regex_t = '' .
+   regex_t = '.*'.
+endif.
+
+total_entries = 0.
+
+date_exist = ' '.
+
+date_minus_1 = date_in - 1.
+
+
+  gd_day(2)   = date_minus_1+6(2).
+  gd_month(2) = date_minus_1+4(2).
+  gd_year(4)  = date_minus_1(4).
+
+CONCATENATE gd_day gd_month gd_year
+into CHECK_DATE_temp separated by '.'.
+
+SELECT *
+FROM ZENTRIES
+INTO TABLE IT_ZENTRIES.
+
+sort IT_ZENTRIES by ID_ENTRIES.
+
+DESCRIBE TABLE IT_ZENTRIES LINES length_entries_tab.
+
+ID_ENTRIES_temp = length_entries_tab.
+
+LOOP AT IT_ZENTRIES INTO wa_ZENTRIES.
+  IF wa_ZENTRIES-CHECK_DATE = CHECK_DATE_temp.
+    delete from ZENTRIES where CHECK_DATE eq CHECK_DATE_temp.
+    IF date_exist = ' '.
+      ID_ENTRIES_temp = wa_ZENTRIES-ID_ENTRIES - 1.
+    ENDIF.
+    date_exist = 'X'.
+  ENDIF.
+ENDLOOP.
+
+time_f = 000000.
+time_to = time_f - 1.
+
+WA_I_T_SEARCH_temp-regex = regex_t.
+APPEND WA_I_T_SEARCH_temp to  I_T_SEARCH_temp.
+
+global_entries_name = 'global_entries' .
+
+CALL FUNCTION 'TH_SERVER_LIST'
+  TABLES
+    list =                       it_list.
+
+
+LOOP at it_list INTO it_list_wa.
+      DELETE TABLE I_T_SERVER_temp FROM WA_I_T_SERVER_temp.
+      WA_I_T_SERVER_temp-server =  it_list_wa-NAME.
+      APPEND WA_I_T_SERVER_temp to  I_T_SERVER_temp.
+      CALL FUNCTION 'RSSEARCHLOGS_SM21'
+        EXPORTING
+          i_date_from            = date_minus_1
+          i_date_to              = date_minus_1
+          I_TIME_FROM            = time_f
+          I_TIME_TO              = time_to
+          I_T_SERVER             = I_T_SERVER_temp
+          I_T_SEARCH             = I_T_SEARCH_temp
+        IMPORTING
+          E_T_SYSLOG_FOUND       = RSSRC_T_SYSLOG_temp
+          .
+
+      DESCRIBE TABLE RSSRC_T_SYSLOG_temp LINES length_e_t_syslog_found.
+
+      total_entries =  total_entries + length_e_t_syslog_found.
+
+      ID_ENTRIES_temp = ID_ENTRIES_temp + 1.
+      wa_ZENTRIES-ID_ENTRIES = ID_ENTRIES_temp.
+      wa_ZENTRIES-CHECK_DATE = CHECK_DATE_temp.
+      wa_ZENTRIES-SERVER_NAME = it_list_wa-NAME.
+      wa_ZENTRIES-NBR_ENTRIES  = length_e_t_syslog_found.
+
+      INSERT ZENTRIES from wa_ZENTRIES.
+
+ENDLOOP.
+
+ID_ENTRIES_temp = ID_ENTRIES_temp + 1.
+wa_ZENTRIES-ID_ENTRIES = ID_ENTRIES_temp.
+wa_ZENTRIES-CHECK_DATE = CHECK_DATE_temp.
+wa_ZENTRIES-SERVER_NAME = global_entries_name.
+wa_ZENTRIES-NBR_ENTRIES  = total_entries.
+
+INSERT ZENTRIES from wa_ZENTRIES.
+
+DATA : GR_TABLE TYPE REF TO CL_SALV_TABLE.
+
+SELECT *
+FROM ZENTRIES
+INTO TABLE IT_ZENTRIES.
+
+it_zentries_idx = 1.
+
+LOOP AT IT_ZENTRIES INTO wa_ZENTRIES.
+  gd_outputdate = wa_ZENTRIES-CHECK_DATE.
+  gd_day(2)   = gd_outputdate(2).
+  gd_month(2) = gd_outputdate+3(2).
+  gd_year(4)  = gd_outputdate+6(4).
+  CONCATENATE gd_year gd_month gd_day
+  into wa_ZENTRIES-CHECK_DATE.
+  if wa_ZENTRIES-SERVER_NAME = 'global_entries'.
+     wa_ZENTRIES-SERVER_NAME = 'zzglobal_entries'.
+  ENDIF.
+  MODIFY IT_ZENTRIES FROM wa_ZENTRIES INDEX it_zentries_idx TRANSPORTING CHECK_DATE SERVER_NAME.
+  it_zentries_idx = it_zentries_idx + 1.
+ENDLOOP.
+
+*sort IT_ZENTRIES by SERVER_NAME  ASCENDING .
+sort IT_ZENTRIES by CHECK_DATE DESCENDING .
+
+DESCRIBE TABLE IT_ZENTRIES LINES length_entries_tab.
+
+if ( mx_it_dt >  length_entries_tab ) or mx_it_dt = 0.
+  mx_it_dt = length_entries_tab.
+ENDIF.
+*20220219
+
+dtes_equals = 1 .
+it_zentries_idx = 1.
+idx_it_dte_eq = 0.
+
+LOOP AT IT_ZENTRIES INTO wa_ZENTRIES.
+  DATE_temp = wa_ZENTRIES-CHECK_DATE.
+  if DATE_temp1 = DATE_temp.
+    dtes_equals = dtes_equals + 1.
+  ENDIF.
+  if DATE_temp1 <> DATE_temp.
+    CLEAR IT_ZENTRIES_temp.
+    idx_it_dte_eq = it_zentries_idx - dtes_equals .
+    WHILE idx_it_dte_eq  < it_zentries_idx .
+      READ TABLE IT_ZENTRIES INTO wa_ZENTRIES_temp INDEX idx_it_dte_eq.
+      APPEND wa_ZENTRIES_temp to IT_ZENTRIES_temp.
+      idx_it_dte_eq = idx_it_dte_eq + 1.
+    ENDWHILE.
+    SORT IT_ZENTRIES_temp by SERVER_NAME.
+    LOOP AT IT_ZENTRIES_temp INTO wa_ZENTRIES_temp.
+      if  wa_ZENTRIES_temp-CHECK_DATE <> ''.
+        if wa_ZENTRIES_temp-SERVER_NAME = 'zzglobal_entries'.
+          wa_ZENTRIES_temp-SERVER_NAME = 'global_entries'.
+        ENDIF.
+
+          gd_outputdate = wa_ZENTRIES_temp-CHECK_DATE.
+          gd_year(4)  = gd_outputdate(4).
+          gd_month(2)   = gd_outputdate+4(2).
+          gd_day(2) = gd_outputdate+6(2).
+          CONCATENATE  gd_day gd_month gd_year
+          into wa_ZENTRIES_temp-CHECK_DATE SEPARATED BY '.'.
+
+        WRITE: /
+        wa_ZENTRIES_temp-CHECK_DATE,
+        wa_ZENTRIES_temp-SERVER_NAME,
+        wa_ZENTRIES_temp-NBR_ENTRIES.
+      ENDIF.
+    ENDLOOP.
+    dtes_equals = 1.
+    iterator_date = iterator_date + 1.
+    WRITE : / '*******************************************************************************************'.
+  ENDIF.
+  if iterator_date > mx_it_dt.
+    exit.
+  ENDIF.
+  DATE_temp1 = DATE_temp.
+  it_zentries_idx = it_zentries_idx + 1.
+ENDLOOP.
