@@ -56,9 +56,9 @@ DATA :date_minus_1 type d,
       time_to type t.
 
 data: gd_outputdate type string,
-           gd_day(2),   
-           gd_month(2), 
-           gd_year(4).  
+           gd_day(2),
+           gd_month(2),
+           gd_year(4).
 
 
 
@@ -277,7 +277,7 @@ ENDWHILE.
 
 SORT IT_ZENTRIES_temp by SERVER_NAME.
 date_disp_once = abap_true.
- 
+
  LOOP AT IT_ZENTRIES_temp INTO wa_ZENTRIES_temp.
   if  wa_ZENTRIES_temp-CHECK_DATE <> ''.
     if wa_ZENTRIES_temp-SERVER_NAME = 'zzglobal_entries'.
@@ -299,7 +299,7 @@ date_disp_once = abap_true.
     WRITE: /3 sy-vline,(10)dt_to_disp_str ,sy-vline, (25)wa_ZENTRIES_temp-SERVER_NAME,sy-vline, (11)nbr_entries_str, sy-vline.
   ENDIF.
  ENDLOOP.
- 
+
 if iterator_date <= mx_it_dt.
   WRITE : /3 sy-uline(56).
 ENDIF.
