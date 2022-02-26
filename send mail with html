@@ -1,0 +1,388 @@
+*&---------------------------------------------------------------------*
+*& Report  Z_01_CONCATINATE_LINES
+*&
+*&---------------------------------------------------------------------*
+*&
+*&
+*&---------------------------------------------------------------------*
+
+REPORT  Z_01_CONCATINATE_LINES.
+
+Type-POOLS rssrc.
+type-pools ABAP .
+DATA: I_T_SEARCH_temp type  RSSRC_T_FIELDVAL,
+      I_T_SERVER_temp type  RSSRC_T_SERVER,
+      RSSRC_T_SYSLOG_temp type RSSRC_T_SYSLOG_FOUND,
+      wa_RSSRC_T_SYSLOG_temp LIKE LINE OF RSSRC_T_SYSLOG_temp,
+      WA_I_T_SEARCH_temp LIKE LINE OF I_T_SEARCH_temp,
+      WA_I_T_SERVER_temp LIKE LINE OF I_T_SERVER_temp,
+      it_list TYPE STANDARD TABLE OF MSXXLIST,
+      it_list_wa LIKE LINE OF it_list,
+      length_it_list TYPE i,
+      length_entries_tab TYPE i,
+      ID_ENTRIES_temp TYPE i,
+      global_entries_name TYPE string,
+      iterator_it_list type i,
+      length_e_t_syslog_found type i,
+      iterator_e_t_syslog_found  type i,
+      iterator_date  type i,
+      date_exist  type c LENGTH 1,
+      CHECK_DATE_temp  type MSNAME2,
+      DATE_temp  type MSNAME2,
+      DATE_temp1  type MSNAME2,
+      total_entries  type i,
+      idx_it_zentries_temp  type i,
+      dtes_equals  type i,
+      dt_dist_nbr  type i,
+      dt_dist_nbr_temp  type i,
+      lst_it_zentries_idx  type i,
+      idx_it_dte_eq  type i,
+      nbr_entries_str type string,
+      dt_to_disp_str type string,
+      it_zentries_idx  type i.
+
+DATA date_disp_once TYPE abap_bool.
+
+date_disp_once = abap_false.
+
+DATA: wa_ZENTRIES         Type ZENTRIES,
+      wa_ZENTRIES_temp    Type ZENTRIES,
+      it_ZENTRIES         type standard table of ZENTRIES,
+      it_ZENTRIES_dt_diff type standard table of ZENTRIES,
+      IT_ZENTRIES_temp    type standard table of ZENTRIES.
+
+
+DATA :date_minus_1 type d,
+      time_f  type t,
+      time_to type t.
+
+data: gd_outputdate type string,
+           gd_day(2),   "field to store day 'DD'
+           gd_month(2), "field to store month 'MM'
+           gd_year(4).  "field to store year 'YYYY'
+* split date into 3 fields to store 'DD', 'MM' and 'YYYY'
+
+
+PARAMETERS: date_in type d,
+            mx_it_dt type i,
+            regex_t type rschavl.
+
+if date_in = 0.
+  date_in = sy-datum.
+ENDIF.
+
+if regex_t = '' .
+   regex_t = '.*'.
+endif.
+
+total_entries = 0.
+date_exist = ' '.
+
+call function 'RP_CALC_DATE_IN_INTERVAL'
+  exporting
+    date = date_in
+    days = 1
+    months = 0
+    years = 0
+    signum = '-'
+  importing
+    calc_date = date_minus_1.
+gd_day(2)   = date_minus_1+6(2).
+gd_month(2) = date_minus_1+4(2).
+gd_year(4)  = date_minus_1(4).
+
+CONCATENATE gd_day gd_month gd_year
+into CHECK_DATE_temp separated by '.'.
+
+SELECT *
+FROM ZENTRIES
+INTO TABLE IT_ZENTRIES.
+
+sort IT_ZENTRIES by ID_ENTRIES.
+DESCRIBE TABLE IT_ZENTRIES LINES length_entries_tab.
+ID_ENTRIES_temp = length_entries_tab.
+
+LOOP AT IT_ZENTRIES INTO wa_ZENTRIES.
+  IF wa_ZENTRIES-CHECK_DATE = CHECK_DATE_temp.
+    delete from ZENTRIES where CHECK_DATE eq CHECK_DATE_temp.
+    IF date_exist = ' '.
+      ID_ENTRIES_temp = wa_ZENTRIES-ID_ENTRIES - 1.
+    ENDIF.
+    date_exist = 'X'.
+  ENDIF.
+ENDLOOP.
+
+time_f = 000000.
+time_to = time_f - 1.
+WA_I_T_SEARCH_temp-regex = regex_t.
+APPEND WA_I_T_SEARCH_temp to  I_T_SEARCH_temp.
+global_entries_name = 'global_entries' .
+
+CALL FUNCTION 'TH_SERVER_LIST'
+  TABLES
+    list =                       it_list.
+
+LOOP at it_list INTO it_list_wa.
+  DELETE TABLE I_T_SERVER_temp FROM WA_I_T_SERVER_temp.
+  WA_I_T_SERVER_temp-server =  it_list_wa-NAME.
+  APPEND WA_I_T_SERVER_temp to  I_T_SERVER_temp.
+  CALL FUNCTION 'RSSEARCHLOGS_SM21'
+    EXPORTING
+      i_date_from            = date_minus_1
+      i_date_to              = date_minus_1
+      I_TIME_FROM            = time_f
+      I_TIME_TO              = time_to
+      I_T_SERVER             = I_T_SERVER_temp
+      I_T_SEARCH             = I_T_SEARCH_temp
+    IMPORTING
+      E_T_SYSLOG_FOUND       = RSSRC_T_SYSLOG_temp.
+  DESCRIBE TABLE RSSRC_T_SYSLOG_temp LINES length_e_t_syslog_found.
+  total_entries =  total_entries + length_e_t_syslog_found.
+  ID_ENTRIES_temp = ID_ENTRIES_temp + 1.
+  wa_ZENTRIES-ID_ENTRIES = ID_ENTRIES_temp.
+  wa_ZENTRIES-CHECK_DATE = CHECK_DATE_temp.
+  wa_ZENTRIES-SERVER_NAME = it_list_wa-NAME.
+  wa_ZENTRIES-NBR_ENTRIES  = length_e_t_syslog_found.
+  INSERT ZENTRIES from wa_ZENTRIES.
+ENDLOOP.
+
+ID_ENTRIES_temp = ID_ENTRIES_temp + 1.
+wa_ZENTRIES-ID_ENTRIES = ID_ENTRIES_temp.
+wa_ZENTRIES-CHECK_DATE = CHECK_DATE_temp.
+wa_ZENTRIES-SERVER_NAME = global_entries_name.
+wa_ZENTRIES-NBR_ENTRIES  = total_entries.
+
+INSERT ZENTRIES from wa_ZENTRIES.
+
+DATA : GR_TABLE TYPE REF TO CL_SALV_TABLE.
+
+SELECT *
+FROM ZENTRIES
+INTO TABLE IT_ZENTRIES.
+
+it_zentries_idx = 1.
+
+LOOP AT IT_ZENTRIES INTO wa_ZENTRIES.
+  gd_outputdate = wa_ZENTRIES-CHECK_DATE.
+  gd_day(2)   = gd_outputdate(2).
+  gd_month(2) = gd_outputdate+3(2).
+  gd_year(4)  = gd_outputdate+6(4).
+  CONCATENATE gd_year gd_month gd_day
+  into wa_ZENTRIES-CHECK_DATE.
+  if wa_ZENTRIES-SERVER_NAME = 'global_entries'.
+     wa_ZENTRIES-SERVER_NAME = 'zzglobal_entries'.
+  ENDIF.
+  MODIFY IT_ZENTRIES FROM wa_ZENTRIES INDEX it_zentries_idx TRANSPORTING CHECK_DATE SERVER_NAME.
+  it_zentries_idx = it_zentries_idx + 1.
+ENDLOOP.
+
+*sort IT_ZENTRIES by SERVER_NAME  ASCENDING .
+sort IT_ZENTRIES by CHECK_DATE DESCENDING .
+it_ZENTRIES_dt_diff = IT_ZENTRIES.
+
+delete adjacent duplicates from it_ZENTRIES_dt_diff comparing CHECK_DATE.
+
+DESCRIBE TABLE it_ZENTRIES_dt_diff LINES dt_dist_nbr.
+
+DESCRIBE TABLE IT_ZENTRIES LINES length_entries_tab.
+
+if ( mx_it_dt >  length_entries_tab ) or mx_it_dt = 0.
+  mx_it_dt = length_entries_tab.
+ENDIF.
+*20220219
+
+dtes_equals = 1 .
+it_zentries_idx = 1.
+idx_it_dte_eq = 0.
+dt_dist_nbr_temp = 0.
+
+*WRITE : / .
+*WRITE : / .
+*WRITE : / .
+*WRITE : /3 sy-uline(56).
+*WRITE: /3 sy-vline,(10)'CHECK_DATE' ,sy-vline, (25)'SERVER_NAME',sy-vline, (11) 'NBR_ENTRIES', sy-vline.
+
+LOOP AT IT_ZENTRIES INTO wa_ZENTRIES.
+  DATE_temp = wa_ZENTRIES-CHECK_DATE.
+  if DATE_temp1 = DATE_temp.
+    dtes_equals = dtes_equals + 1.
+  ENDIF.
+  if DATE_temp1 <> DATE_temp.
+    dt_dist_nbr_temp = dt_dist_nbr_temp + 1 .
+    if dt_dist_nbr_temp = dt_dist_nbr.
+      lst_it_zentries_idx = it_zentries_idx .
+    endif.
+    CLEAR IT_ZENTRIES_temp.
+    idx_it_dte_eq = it_zentries_idx - dtes_equals .
+    WHILE idx_it_dte_eq  < it_zentries_idx .
+      READ TABLE IT_ZENTRIES INTO wa_ZENTRIES_temp INDEX idx_it_dte_eq.
+      APPEND wa_ZENTRIES_temp to IT_ZENTRIES_temp.
+      idx_it_dte_eq = idx_it_dte_eq + 1.
+    ENDWHILE.
+    SORT IT_ZENTRIES_temp by SERVER_NAME.
+    date_disp_once = abap_true.
+    PERFORM sort_by_name.
+    dtes_equals = 1.
+    iterator_date = iterator_date + 1.
+  ENDIF.
+  if iterator_date > mx_it_dt.
+    exit.
+  ENDIF.
+  DATE_temp1 = DATE_temp.
+  it_zentries_idx = it_zentries_idx + 1.
+ENDLOOP.
+CLEAR IT_ZENTRIES_temp.
+WHILE lst_it_zentries_idx  < it_zentries_idx .
+  if iterator_date > mx_it_dt.
+    exit.
+  ENDIF.
+  READ TABLE IT_ZENTRIES INTO wa_ZENTRIES_temp INDEX lst_it_zentries_idx.
+  APPEND wa_ZENTRIES_temp to IT_ZENTRIES_temp.
+  lst_it_zentries_idx = lst_it_zentries_idx + 1.
+ENDWHILE.
+SORT IT_ZENTRIES_temp by SERVER_NAME.
+date_disp_once = abap_true.
+PERFORM sort_by_name.
+
+
+* Selection screen: enter receiver (default is yourself)
+PARAMETERS p_rec TYPE so_recname OBLIGATORY DEFAULT sy-uname.
+PARAMETERS p_typ TYPE so_escape OBLIGATORY DEFAULT 'B'. "sap user
+
+* Data Declaration
+DATA: wa_docdata TYPE sodocchgi1,
+      wa_objpack TYPE sopcklsti1 ,
+      it_objpack TYPE TABLE OF sopcklsti1,
+      wa_objtxt TYPE solisti1,
+      it_objtxt TYPE TABLE OF solisti1,
+      wa_reclist TYPE somlreci1,
+      it_reclist TYPE TABLE OF somlreci1.
+DATA: tab_lines TYPE i.
+
+* Start program
+PERFORM fill_table_header.
+PERFORM fill_object_details.
+*create receiver list
+PERFORM create_receivers_list.
+*send mail
+PERFORM send_mail.
+WRITE: / 'End of Program'.
+*---------------------------------------------------------------------*
+*Form fill table's header
+*---------------------------------------------------------------------*
+FORM fill_table_header .
+  wa_objtxt = '<table>'.
+  APPEND wa_objtxt TO it_objtxt.
+  wa_objtxt = '<table>'.
+  APPEND wa_objtxt TO it_objtxt.
+  wa_objtxt = '<th>CHECK_DATE</th>'.
+  APPEND wa_objtxt TO it_objtxt.
+  wa_objtxt = '<th>SERVER_NAME</th>'.
+  APPEND wa_objtxt TO it_objtxt.
+  wa_objtxt = '<th>NBR_ENTRIES</th>'.
+  APPEND wa_objtxt TO it_objtxt.
+  wa_objtxt = '</tr>'.
+  APPEND wa_objtxt TO it_objtxt.
+ENDFORM. " fill table header
+
+*-------------------------------------------------------------------------*
+*Form sort_by_name sort the table by server name and create the html table
+*-------------------------------------------------------------------------*
+FORM sort_by_name.
+  wa_objtxt = '<tr>'.
+  APPEND wa_objtxt TO it_objtxt.
+  wa_objtxt = '<tr>'.
+  APPEND wa_objtxt TO it_objtxt.
+  LOOP AT IT_ZENTRIES_temp INTO wa_ZENTRIES_temp.
+    if  wa_ZENTRIES_temp-CHECK_DATE <> ''.
+      if wa_ZENTRIES_temp-SERVER_NAME = 'zzglobal_entries'.
+        wa_ZENTRIES_temp-SERVER_NAME = 'global_entries'.
+      ENDIF.
+      gd_outputdate = wa_ZENTRIES_temp-CHECK_DATE.
+      gd_year(4)  = gd_outputdate(4).
+      gd_month(2)   = gd_outputdate+4(2).
+      gd_day(2) = gd_outputdate+6(2).
+      CONCATENATE  gd_day gd_month gd_year
+      into wa_ZENTRIES_temp-CHECK_DATE SEPARATED BY '.'.
+      if date_disp_once = abap_true.
+        dt_to_disp_str = wa_ZENTRIES_temp-CHECK_DATE .
+        date_disp_once = abap_false.
+      ELSE.
+        dt_to_disp_str = ''.
+      endif.
+      nbr_entries_str = wa_ZENTRIES_temp-NBR_ENTRIES.
+      PERFORM entries_html_row USING dt_to_disp_str.      
+      PERFORM entries_html_row USING wa_ZENTRIES_temp-SERVER_NAME.      
+      PERFORM entries_html_row USING nbr_entries_str.   
+      wa_objtxt = '</table>'.
+      APPEND wa_objtxt TO it_objtxt.  
+    ENDIF.
+  ENDLOOP.
+ENDFORM. "sort by server name
+
+
+*---------------------------------------------------------------------*
+*Form fill_object_details
+*---------------------------------------------------------------------*
+FORM fill_object_details .
+  DESCRIBE TABLE it_objtxt LINES tab_lines.
+  READ TABLE it_objtxt INTO wa_objtxt INDEX tab_lines.
+  wa_docdata-obj_name = 'TEST_HTML'.
+  wa_docdata-obj_descr = 'Test for HTML Code'.
+  wa_docdata-doc_size = ( tab_lines - 1 ) * 255 + STRLEN( wa_objtxt ).
+  CLEAR wa_objpack-transf_bin.
+  wa_objpack-head_start = 1.
+  wa_objpack-head_num = 0.
+  wa_objpack-body_start = 1.
+  wa_objpack-body_num = tab_lines.
+  wa_objpack-doc_type = 'HTM'.
+  APPEND wa_objpack TO it_objpack.
+ENDFORM. " fill_object_details
+*---------------------------------------------------------------------*
+*Form create_receivers_list
+*---------------------------------------------------------------------*
+FORM create_receivers_list .
+  wa_reclist-receiver = p_rec.
+  wa_reclist-rec_type = p_typ.
+  APPEND wa_reclist TO it_reclist.
+ENDFORM. " create_receivers_list
+*---------------------------------------------------------------------
+*Form send_mail
+*---------------------------------------------------------------------\
+FORM send_mail .
+  CALL FUNCTION 'SO_DOCUMENT_SEND_API1'
+    EXPORTING
+      document_data              = wa_docdata
+      put_in_outbox              = ' '
+      commit_work                = 'X'
+    TABLES
+      packing_list               = it_objpack
+      contents_txt               = it_objtxt
+      receivers                  = it_reclist
+    EXCEPTIONS
+      too_many_receivers         = 1
+      document_not_sent          = 2
+      document_type_not_exist    = 3
+      operation_no_authorization = 4
+      parameter_error            = 5
+      x_error                    = 6
+      enqueue_error              = 7
+      OTHERS                     = 8.
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE 'S' NUMBER sy-msgno
+    WITH sy-msgv1.
+  ELSE.
+    WRITE : / 'Mail sent to', p_rec.
+  ENDIF.
+ENDFORM. " send_mail
+*---------------------------------------------------------------------
+*Form entries row
+*---------------------------------------------------------------------\
+FORM entries_html_row USING row_field.
+  wa_objtxt = '<td>'.
+  APPEND wa_objtxt TO it_objtxt.
+  wa_objtxt = row_field.
+  APPEND wa_objtxt TO it_objtxt.    
+  wa_objtxt = '</td>'.
+  APPEND wa_objtxt TO it_objtxt. 
+endform.
